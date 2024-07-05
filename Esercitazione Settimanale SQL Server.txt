@@ -1,0 +1,327 @@
+-- Al fine di rendere l'esercizio più interessante, ho deciso di mettere tutto in un'unica query SQL
+-- Questo script comprende la creazione del database, delle tabelle, dei vincoli, dei trigger, delle stored procedure, l'inserimento di dati di esempio ed infine le query richieste.
+-- N.B. se non ha una cartella denominata "backups" sul disco C:, il backup non verrà eseguito e verrà generato un errore
+
+-- Effettuo dei controlli preliminari per verificare l'esistenza del database e delle tabelle, al fine di evitare errori di creazione duplicata
+-- Eliminazione dei trigger
+IF OBJECT_ID('trg_after_insert_verbale', 'TR') IS NOT NULL
+    DROP TRIGGER trg_after_insert_verbale;
+IF OBJECT_ID('trg_after_update_verbale', 'TR') IS NOT NULL
+    DROP TRIGGER trg_after_update_verbale;
+IF OBJECT_ID('trg_after_delete_verbale', 'TR') IS NOT NULL
+    DROP TRIGGER trg_after_delete_verbale;
+
+-- Eliminazione della stored procedure
+IF OBJECT_ID('InsertVerbale', 'P') IS NOT NULL
+    DROP PROCEDURE InsertVerbale;
+
+-- Eliminazione delle tabelle
+IF OBJECT_ID('AUDIT_LOG', 'U') IS NOT NULL
+    DROP TABLE AUDIT_LOG;
+IF OBJECT_ID('VERBALE', 'U') IS NOT NULL
+    DROP TABLE VERBALE;
+IF OBJECT_ID('ANAGRAFICA', 'U') IS NOT NULL
+    DROP TABLE ANAGRAFICA;
+IF OBJECT_ID('TIPO_VIOLAZIONE', 'U') IS NOT NULL
+    DROP TABLE TIPO_VIOLAZIONE;
+
+-- Utilizzo il comando GO per separare i batch
+GO
+
+-- Creazione delle tabella Anagrafica
+CREATE TABLE ANAGRAFICA (
+    [idanagrafica] INT            IDENTITY (1, 1) NOT NULL,
+    [Cognome]      NVARCHAR (50)  NOT NULL,
+    [Nome]         NVARCHAR (50)  NOT NULL,
+    [DataNascita]  DATETIME2      NOT NULL,
+    [Indirizzo]    NVARCHAR (100) NOT NULL,
+    [Citta]        NVARCHAR (50)  NOT NULL,
+    [Provincia]    VARCHAR (2)    NOT NULL,
+    [CAP]          VARCHAR (5)    NOT NULL,
+    [Cod_Fisc]     VARCHAR (16)   NOT NULL,
+    [PIVA]         VARCHAR (11)   NULL,
+    [Telefono]     VARCHAR (15)   NULL,
+    [Cellulare]    VARCHAR (15)   NULL,
+    [Email]        NVARCHAR (80)  NULL,
+    PRIMARY KEY CLUSTERED ([idanagrafica] ASC),
+    INDEX idx_cognome_nome (Cognome, Nome),
+    INDEX idx_Cod_Fisc (Cod_Fisc)
+);
+
+-- Vincolo per l'unicità del Codice Fiscale
+ALTER TABLE ANAGRAFICA
+ADD CONSTRAINT UQ_Cod_Fisc UNIQUE (Cod_Fisc);
+
+-- Vincolo per l'unicità dell'Email
+ALTER TABLE ANAGRAFICA
+ADD CONSTRAINT UQ_Email UNIQUE (Email);
+
+-- Vincolo per il formato del CAP
+ALTER TABLE ANAGRAFICA
+ADD CONSTRAINT CK_CAP CHECK (CAP LIKE '[0-9][0-9][0-9][0-9][0-9]');
+
+-- Creazione delle tabella TIPO_VIOLAZIONE
+CREATE TABLE TIPO_VIOLAZIONE (
+    IdViolazione    INT IDENTITY (1,1)   NOT NULL,
+    Descrizione     NVARCHAR (100)       NOT NULL,
+    PRIMARY KEY CLUSTERED ([IdViolazione] ASC)
+);
+
+-- Creazione delle tabella VIOLAZIONI
+CREATE TABLE VERBALE (
+    [IdVerbale]               INT             IDENTITY (1, 1) NOT NULL,
+    [IdAnagrafica]            INT             NOT NULL,
+    [IdViolazione]            INT             NOT NULL,
+    [DataViolazione]          DATETIME2 (7)   NOT NULL,
+    [IndirizzoViolazione]     NVARCHAR (100)  NOT NULL,
+    [NominativoAgente]        NVARCHAR (50)   NOT NULL,
+    [DataTrascrizioneVerbale] DATETIME2 (7)   NOT NULL,
+    [Importo]                 DECIMAL (18, 2) NOT NULL,
+    [DecurtamentoPunti]       INT             NOT NULL,
+    PRIMARY KEY CLUSTERED ([IdVerbale] ASC),
+    FOREIGN KEY (IdAnagrafica) REFERENCES ANAGRAFICA(IdAnagrafica),
+    FOREIGN KEY (IdViolazione) REFERENCES TIPO_VIOLAZIONE(IdViolazione),
+    INDEX idx_dataViolazione (DataViolazione ASC),
+    INDEX idx_dataTrascrizione (DataTrascrizioneVerbale ASC)
+);
+
+-- Creazione della tabella AUDIT_LOG, al fine di poter tracciare le operazioni effettuate sul database
+CREATE TABLE AUDIT_LOG (
+    [IdLog]             INT             IDENTITY (1, 1) NOT NULL,
+    [IdVerbale]         INT             NOT NULL,
+    [DataOperazione]    DATETIME2 (7)   NOT NULL,
+    [Operazione]        NVARCHAR (100)  NOT NULL,
+    [Utente]            NVARCHAR (50)   NOT NULL,
+    [Descrizione]       NVARCHAR (100)  NOT NULL,
+    PRIMARY KEY CLUSTERED ([IdLog] ASC),
+    FOREIGN KEY (IdVerbale) REFERENCES VERBALE(IdVerbale)
+);
+
+GO
+
+-- Creo dei trigger che vengono attivati automaticamente dopo ogni operazione effettuata sui record delle tabelle VERBALE, al fine di tracciare le operazioni effettuate sul database
+-- Trigger per INSERT su VERBALE
+CREATE TRIGGER trg_after_insert_verbale
+ON VERBALE
+AFTER INSERT
+AS
+BEGIN
+    INSERT INTO AUDIT_LOG (IdVerbale, DataOperazione, Operazione, Utente, Descrizione)
+    SELECT
+        INSERTED.IdVerbale,
+        GETDATE(),
+        'INSERT',
+        SUSER_SNAME(),
+        'Inserimento di un nuovo verbale'
+    FROM INSERTED;
+END
+GO
+
+-- Trigger per UPDATE su VERBALE
+CREATE TRIGGER trg_after_update_verbale
+ON VERBALE
+AFTER UPDATE
+AS
+BEGIN
+    INSERT INTO AUDIT_LOG (IdVerbale, DataOperazione, Operazione, Utente, Descrizione)
+    SELECT
+        INSERTED.IdVerbale,
+        GETDATE(),
+        'UPDATE',
+        SUSER_SNAME(),
+        'Aggiornamento di un verbale'
+    FROM INSERTED;
+END
+GO
+
+-- Trigger per DELETE su VERBALE
+CREATE TRIGGER trg_after_delete_verbale
+ON VERBALE
+AFTER DELETE
+AS
+BEGIN
+    INSERT INTO AUDIT_LOG (IdVerbale, DataOperazione, Operazione, Utente, Descrizione)
+    SELECT
+        DELETED.IdVerbale,
+        GETDATE(),
+        'DELETE',
+        SUSER_SNAME(),
+        'Cancellazione di un verbale'
+    FROM DELETED;
+END
+GO
+
+-- Stored Procedure per l'inserimento di un nuovo verbale
+CREATE PROCEDURE InsertVerbale
+    @IdAnagrafica INT,
+    @IdViolazione INT,
+    @DataViolazione DATETIME2(7),
+    @IndirizzoViolazione NVARCHAR(100),
+    @NominativoAgente NVARCHAR(50),
+    @DataTrascrizioneVerbale DATETIME2(7),
+    @Importo DECIMAL(18, 2),
+    @DecurtamentoPunti INT
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        INSERT INTO VERBALE (IdAnagrafica, IdViolazione, DataViolazione, IndirizzoViolazione, NominativoAgente, DataTrascrizioneVerbale, Importo, DecurtamentoPunti)
+        VALUES (@IdAnagrafica, @IdViolazione, @DataViolazione, @IndirizzoViolazione, @NominativoAgente, @DataTrascrizioneVerbale, @Importo, @DecurtamentoPunti);
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR(@ErrorMessage, 16, 1);
+    END CATCH;
+END
+GO
+
+-- Script per il backup del database
+BACKUP DATABASE [U4-W3-D5] TO DISK = 'C:\backups\U4-W3-D5.bak'
+WITH FORMAT,
+MEDIANAME = 'U4-W3-D5Backup',
+NAME = 'Backup completo del database U4-W3-D5';
+
+-- Anagrafiche di esempio
+INSERT INTO ANAGRAFICA (Cognome, Nome, DataNascita, Indirizzo, Citta, Provincia, CAP, Cod_Fisc, Email) VALUES
+('Bunny', 'Bugs', '1938-07-27', 'Via della Carota 1', 'Palermo', 'PA', '90100', 'BNNBG90100P1', 'bugs.bunny1@example.com'),
+('Duck', 'Daffy', '1937-04-17', 'Via delle Papere 2', 'Roma', 'RM', '00100', 'DCKDF00100R2', 'daffy.duck2@example.com'),
+('Fudd', 'Elmer', '1940-03-02', 'Via del Cacciatore 3', 'Milano', 'MI', '20100', 'FDDLM20100M3', 'elmer.fudd3@example.com'),
+('Devil', 'Tasmanian', '1954-10-01', 'Via del Tornado 4', 'Napoli', 'NA', '80100', 'DVLTS80100N4', 'tasmanian.devil4@example.com'),
+('Runner', 'Road', '1949-09-17', 'Via della Corsa 5', 'Firenze', 'FI', '50100', 'RNNRR50100F5', 'road.runner5@example.com'),
+('Coyote', 'Wile E.', '1949-09-17', 'Via del Coyote 6', 'Palermo', 'PA', '90100', 'CYTWY90100P6', 'wile.e.coyote6@example.com'),
+('Porky', 'Pig', '1935-03-02', 'Via del Maialino 7', 'Torino', 'TO', '10100', 'PRKPG10100T7', 'porky.pig7@example.com'),
+('Martian', 'Marvin', '1948-07-24', 'Via del Pianeta 8', 'Palermo', 'PA', '90100', 'MRTMN90100P8', 'marvin.martian8@example.com'),
+('Sylvester', 'Cat', '1945-03-24', 'Via del Gatto 9', 'Bologna', 'BO', '40100', 'SYLC40100B9', 'sylvester.cat9@example.com'),
+('Foghorn', 'Leghorn', '1946-08-31', 'Via del Pollo 10', 'Palermo', 'PA', '90100', 'FGHRN90100P0', 'foghorn.leghorn0@example.com');
+
+-- Violazioni di esempio
+INSERT INTO TIPO_VIOLAZIONE (descrizione) VALUES
+('Eccesso di velocità nella corsa'),
+('Sosta vietata nel deserto'),
+('Passaggio con il rosso alla caccia'),
+('Guida senza cinture durante un tornado'),
+('Uso del cellulare alla guida di un razzo'),
+('Parcheggio su posto per cartoni storici'),
+('Guida in stato di ebbrezza con ACME');
+
+-- Verbali di esempio
+INSERT INTO VERBALE (IdAnagrafica, IdViolazione, DataViolazione, IndirizzoViolazione, NominativoAgente, DataTrascrizioneVerbale, Importo, DecurtamentoPunti) VALUES
+(1, 1, '2024-01-15 10:30:00', 'Via della Carota 1', 'Yosemite Sam', '2024-01-15 11:00:00', 150.00, 3),
+(2, 2, '2024-02-16 09:45:00', 'Via delle Papere 2', 'Speedy Gonzales', '2024-02-16 10:15:00', 100.00, 2),
+(3, 3, '2024-03-17 14:30:00', 'Via del Cacciatore 3', 'Tweety', '2024-03-17 15:00:00', 200.00, 5),
+(4, 4, '2024-04-18 11:00:00', 'Via del Tornado 4', 'Bugs Bunny', '2024-04-18 11:30:00', 80.00, 1),
+(5, 5, '2024-05-19 16:45:00', 'Via della Corsa 5', 'Daffy Duck', '2024-05-19 17:15:00', 120.00, 3),
+(6, 6, '2024-06-20 12:30:00', 'Via del Coyote 6', 'Elmer Fudd', '2024-06-20 13:00:00', 450.00, 6),
+(7, 7, '2024-07-21 08:15:00', 'Via del Maialino 7', 'Tasmanian Devil', '2024-07-21 08:45:00', 600.00, 7),
+(8, 1, '2024-08-22 15:00:00', 'Via del Pianeta 8', 'Road Runner', '2024-08-22 15:30:00', 150.00, 3),
+(9, 2, '2009-03-01 17:45:00', 'Via del Gatto 9', 'Marvin the Martian', '2009-03-01 18:15:00', 100.00, 2),
+(10, 3, '2009-04-15 13:30:00', 'Via del Pollo 10', 'Sylvester', '2009-04-15 14:00:00', 200.00, 5);
+
+-- 1. Conteggio dei verbali trascritti
+SELECT COUNT(*) AS TotaleVerbaliTrascritti
+FROM VERBALE;
+
+-- 2. Conteggio dei verbali trascritti raggruppati per anagrafe
+SELECT
+    ANAGRAFICA.Cognome,
+    ANAGRAFICA.Nome,
+	COUNT(*) AS TotaleVerbali
+FROM VERBALE
+JOIN ANAGRAFICA ON VERBALE.IdAnagrafica = ANAGRAFICA.IdAnagrafica
+GROUP BY ANAGRAFICA.Cognome, ANAGRAFICA.Nome;
+
+-- 3. Conteggio dei verbali trascritti raggruppati per tipo di violazione
+SELECT
+	TIPO_VIOLAZIONE.Descrizione,
+	COUNT(*) AS TotaleVerbali
+FROM VERBALE
+JOIN TIPO_VIOLAZIONE ON VERBALE.IdViolazione = TIPO_VIOLAZIONE.IdViolazione
+GROUP BY TIPO_VIOLAZIONE.Descrizione;
+
+-- 4. Totale dei punti decurtati per ogni anagrafe
+SELECT
+	ANAGRAFICA.Cognome,
+	ANAGRAFICA.Nome,
+	SUM(VERBALE.DecurtamentoPunti) AS TotalePuntiDecurtati
+FROM VERBALE
+JOIN ANAGRAFICA ON VERBALE.IdAnagrafica = ANAGRAFICA.IdAnagrafica
+GROUP BY ANAGRAFICA.Cognome, ANAGRAFICA.Nome;
+
+-- 5. Cognome, Nome, Data violazione, Indirizzo violazione, importo e punti decurtati per tutti gli anagrafici residenti a Palermo
+SELECT
+	ANAGRAFICA.Cognome,
+	ANAGRAFICA.Nome,
+	VERBALE.DataViolazione,
+	VERBALE.IndirizzoViolazione,
+	VERBALE.Importo,
+	VERBALE.DecurtamentoPunti
+FROM VERBALE
+JOIN ANAGRAFICA ON VERBALE.IdAnagrafica = ANAGRAFICA.IdAnagrafica
+WHERE ANAGRAFICA.Citta = 'Palermo';
+
+-- 6. Cognome, Nome, Indirizzo, Data violazione, importo e punti decurtati per le violazioni fatte tra il febbraio 2009 e luglio 2009
+SELECT
+	ANAGRAFICA.Cognome,
+	ANAGRAFICA.Nome,
+	ANAGRAFICA.Indirizzo,
+	VERBALE.DataViolazione,
+	VERBALE.Importo,
+	VERBALE.DecurtamentoPunti
+FROM VERBALE
+JOIN ANAGRAFICA ON VERBALE.IdAnagrafica = ANAGRAFICA.IdAnagrafica
+WHERE VERBALE.DataViolazione BETWEEN '2009-02-01' AND '2009-07-31';
+
+-- 7. Totale degli importi per ogni anagrafico
+SELECT
+	ANAGRAFICA.Cognome,
+	ANAGRAFICA.Nome,
+	SUM(VERBALE.Importo) AS TotaleImporti
+FROM VERBALE
+JOIN ANAGRAFICA ON VERBALE.IdAnagrafica = ANAGRAFICA.IdAnagrafica
+GROUP BY ANAGRAFICA.Cognome, ANAGRAFICA.Nome;
+
+-- 8. Visualizzazione di tutti gli anagrafici residenti a Palermo
+SELECT *
+FROM ANAGRAFICA
+WHERE Citta = 'Palermo';
+
+-- 9. Query che visualizzi Data violazione, Importo e decurtamento punti relativi ad una certa data
+SELECT
+	DataViolazione,
+	Importo,
+	DecurtamentoPunti
+FROM VERBALE
+WHERE DataViolazione = '2024-01-15 10:30:00';
+
+-- 10. Conteggio delle violazioni contestate raggruppate per Nominativo dell’agente di Polizia
+SELECT
+	NominativoAgente,
+	COUNT(*) AS TotaleViolazioni
+FROM VERBALE
+GROUP BY NominativoAgente;
+
+-- 11. Cognome, Nome, Indirizzo, Data violazione, Importo e punti decurtati per tutte le violazioni che superino il decurtamento di 5 punti
+SELECT
+	ANAGRAFICA.Cognome,
+	ANAGRAFICA.Nome,
+	ANAGRAFICA.Indirizzo,
+	VERBALE.DataViolazione,
+	VERBALE.Importo,
+	VERBALE.DecurtamentoPunti
+FROM VERBALE
+JOIN ANAGRAFICA ON VERBALE.IdAnagrafica = ANAGRAFICA.IdAnagrafica
+WHERE VERBALE.DecurtamentoPunti > 5;
+
+-- 12. Cognome, Nome, Indirizzo, Data violazione, Importo e punti decurtati per tutte le violazioni che superino l’importo di 400 euro
+SELECT
+	ANAGRAFICA.Cognome,
+	ANAGRAFICA.Nome,
+	ANAGRAFICA.Indirizzo,
+	VERBALE.DataViolazione,
+	VERBALE.Importo,
+	VERBALE.DecurtamentoPunti
+FROM VERBALE
+JOIN ANAGRAFICA ON VERBALE.IdAnagrafica = ANAGRAFICA.IdAnagrafica
+WHERE VERBALE.Importo > 400.00;

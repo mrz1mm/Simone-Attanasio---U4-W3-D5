@@ -1,0 +1,3 @@
+﻿<Project>
+  <Import Project="..\build\U4-W3-D5.props" />
+</Project>
